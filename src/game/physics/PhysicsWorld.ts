@@ -1,6 +1,14 @@
 import Matter from 'matter-js';
 import type { EntityId } from '../entities/Entity';
 
+export interface CollisionContact {
+  /** Undefined if the colliding body has no owning entity (shouldn't happen for game bodies, but guards otherwise). */
+  entityA: EntityId | undefined;
+  entityB: EntityId | undefined;
+  /** Relative speed between the two bodies at the moment contact began. */
+  impactSpeed: number;
+}
+
 /**
  * Thin wrapper around a Matter.js engine/world. Owns the body<->entity
  * mapping so collision resolution and transform sync can go from a
@@ -74,6 +82,26 @@ export class PhysicsWorld {
 
   getEntityForBody(bodyId: number): EntityId | undefined {
     return this.bodyIdToEntity.get(bodyId);
+  }
+
+  /**
+   * Subscribe to new physics contacts as plain entity-id data, so callers
+   * (CollisionResolver) never need to import Matter or touch a
+   * Matter.Body directly. Fires once per newly-formed contact, not every
+   * step of an ongoing overlap, matching "an impact" rather than
+   * "continuous crushing".
+   */
+  onCollisionStart(handler: (contacts: CollisionContact[]) => void): () => void {
+    const listener = (event: Matter.IEventCollision<Matter.Engine>): void => {
+      const contacts: CollisionContact[] = event.pairs.map((pair) => ({
+        entityA: this.bodyIdToEntity.get(pair.bodyA.id),
+        entityB: this.bodyIdToEntity.get(pair.bodyB.id),
+        impactSpeed: Matter.Vector.magnitude(Matter.Vector.sub(pair.bodyA.velocity, pair.bodyB.velocity)),
+      }));
+      handler(contacts);
+    };
+    Matter.Events.on(this.engine, 'collisionStart', listener);
+    return () => Matter.Events.off(this.engine, 'collisionStart', listener);
   }
 
   dispose(): void {

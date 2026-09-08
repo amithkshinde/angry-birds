@@ -2,6 +2,7 @@ import Matter from 'matter-js';
 import { CollisionCategories } from './CollisionCategories';
 import type { MaterialDefinition } from '../config/MaterialDefinitions';
 import type { BirdDefinition } from '../config/BirdDefinitions';
+import type { PigDefinition } from '../config/PigDefinitions';
 
 export function createGroundBody(
   x: number,
@@ -46,4 +47,13 @@ export function createBirdBody(x: number, y: number, def: BirdDefinition): Matte
   // recomputes inertia so rotation behaves correctly.
   Matter.Body.setMass(body, def.mass);
   return body;
+}
+
+export function createPigBody(x: number, y: number, def: PigDefinition): Matter.Body {
+  return Matter.Bodies.circle(x, y, def.radius, {
+    friction: 0.6,
+    restitution: 0.2,
+    label: 'pig',
+    collisionFilter: { category: CollisionCategories.PIG },
+  });
 }

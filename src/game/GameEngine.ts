@@ -1,15 +1,22 @@
 import { EntityManager } from './entities/EntityManager';
 import { PhysicsWorld } from './physics/PhysicsWorld';
 import { capturePreviousTransforms, syncTransformsFromPhysics } from './physics/PhysicsSync';
+import { CollisionResolver } from './physics/CollisionResolver';
 import { Renderer } from './render/Renderer';
 import { GameConfig } from './config/GameConfig';
 import { MaterialDefinitions } from './config/MaterialDefinitions';
 import { BirdDefinitions } from './config/BirdDefinitions';
+import { PigDefinitions } from './config/PigDefinitions';
 import { createGround } from './entities/factories/GroundFactory';
 import { createBlock } from './entities/factories/BlockFactory';
 import { createBird } from './entities/factories/BirdFactory';
+import { createPig } from './entities/factories/PigFactory';
 import { InputController } from './input/InputController';
 import { SlingshotController } from './input/SlingshotController';
+import { WinLossEvaluator } from './level/WinLossEvaluator';
+import { EventBus } from './EventBus';
+import type { GameEvents } from './GameEvents';
+import { Components } from './entities/ComponentTypes';
 import type { EntityId } from './entities/Entity';
 import type { Point } from './math/Point';
 
@@ -17,20 +24,25 @@ interface SceneSetup {
   birdId: EntityId;
   anchor: Point;
   groundTopY: number;
+  pigCount: number;
 }
 
 /**
  * Owns the fixed-timestep accumulator loop: steps Matter.js at a constant
  * rate regardless of display refresh rate, and renders every animation
  * frame with the leftover fraction used to interpolate positions smoothly.
- * Also owns input, translating raw pointer events into slingshot actions.
+ * Also owns input (translating pointer events into slingshot actions) and
+ * the collision -> damage -> win/loss pipeline.
  */
 export class GameEngine {
   private entityManager = new EntityManager();
   private physicsWorld = new PhysicsWorld(GameConfig.gravity);
+  private eventBus = new EventBus<GameEvents>();
   private renderer: Renderer;
   private inputController: InputController;
   private slingshotController: SlingshotController;
+  private collisionResolver: CollisionResolver;
+  private winLossEvaluator: WinLossEvaluator;
 
   private running = false;
   private rafHandle = 0;
@@ -57,10 +69,17 @@ export class GameEngine {
       scene.groundTopY,
       GameConfig.slingshot,
     );
+    this.collisionResolver = new CollisionResolver(
+      this.entityManager,
+      this.physicsWorld,
+      this.eventBus,
+      GameConfig.collision,
+    );
+    this.winLossEvaluator = new WinLossEvaluator(scene.pigCount, this.eventBus);
     this.wireInput();
   }
 
-  /** Milestone 2 scene: ground, one wooden block target, and a slingshot holding one bird. */
+  /** Milestone 3 scene: ground, one wooden block, a pig perched on it, and a slingshot holding one bird. */
   private setupScene(width: number, height: number): SceneSetup {
     const groundHeight = 80;
     const groundTopY = height - groundHeight;
@@ -82,6 +101,11 @@ export class GameEngine {
 
     createBlock(this.entityManager, this.physicsWorld, MaterialDefinitions.wood, blockX, blockY, blockWidth, blockHeight);
 
+    const pigDef = PigDefinitions.small;
+    const pigX = blockX;
+    const pigY = blockY - blockHeight / 2 - pigDef.radius;
+    createPig(this.entityManager, this.physicsWorld, pigDef, pigX, pigY);
+
     const anchor: Point = {
       x: width * GameConfig.slingshot.anchorXRatio,
       y: groundTopY - GameConfig.slingshot.anchorYOffsetFromGround,
@@ -91,7 +115,7 @@ export class GameEngine {
     // don't touch it while the player is aiming.
     this.physicsWorld.setStatic(birdId, true);
 
-    return { birdId, anchor, groundTopY };
+    return { birdId, anchor, groundTopY, pigCount: 1 };
   }
 
   private wireInput(): void {
@@ -102,6 +126,11 @@ export class GameEngine {
       onUp: (point) => this.slingshotController.handlePointerUp(toWorld(point)),
       onCancel: () => this.slingshotController.handlePointerCancel(),
     });
+  }
+
+  /** Narrow, read-only hook for the React shell to show a "level complete" screen — no engine internals leak out. */
+  onLevelWon(handler: () => void): () => void {
+    return this.eventBus.on('level:won', handler);
   }
 
   start(): void {
@@ -123,6 +152,7 @@ export class GameEngine {
   dispose(): void {
     this.stop();
     this.inputController.dispose();
+    this.collisionResolver.dispose();
     this.physicsWorld.dispose();
   }
 
@@ -139,6 +169,10 @@ export class GameEngine {
       capturePreviousTransforms(this.entityManager);
       this.physicsWorld.step(GameConfig.fixedDtMs);
       syncTransformsFromPhysics(this.entityManager, this.physicsWorld);
+      // Collision callbacks fired synchronously inside step() above; Matter
+      // disallows mutating the world from within them, so entities marked
+      // for death are only actually removed here, between steps.
+      this.processPendingRemovals();
       this.accumulator -= GameConfig.fixedDtMs;
       steps++;
     }
@@ -154,6 +188,17 @@ export class GameEngine {
 
     this.rafHandle = requestAnimationFrame(this.tick);
   };
+
+  private processPendingRemovals(): void {
+    const destroyedIds = this.collisionResolver.consumePendingRemovals();
+    for (const entityId of destroyedIds) {
+      if (this.entityManager.hasComponent(entityId, Components.PigTag)) {
+        this.winLossEvaluator.notifyPigRemoved();
+      }
+      this.physicsWorld.removeBody(entityId);
+      this.entityManager.destroyEntity(entityId);
+    }
+  }
 
   private updateFps(frameTimeMs: number): void {
     this.fpsFrameCount++;

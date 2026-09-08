@@ -9,4 +9,6 @@ export const Components = {
   RenderShape: 'renderShape',
   MaterialTag: 'materialTag',
   BirdTag: 'birdTag',
+  PigTag: 'pigTag',
+  Health: 'health',
 } as const;

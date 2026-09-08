@@ -22,4 +22,10 @@ export const GameConfig = {
     /** How close a pointer-down must land to the bird to grab it. */
     grabRadius: 45,
   },
+  collision: {
+    /** Damage dealt per unit of impact speed on a new physics contact. */
+    damagePerImpactSpeed: 2.5,
+    /** Impacts softer than this deal no damage — filters resting-contact jitter. */
+    minImpactSpeedForDamage: 3,
+  },
 } as const;
