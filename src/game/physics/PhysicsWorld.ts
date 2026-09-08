@@ -39,6 +39,39 @@ export class PhysicsWorld {
     return this.entityToBody.get(entityId);
   }
 
+  /**
+   * Toggle a body static/dynamic. Matter stashes the pre-static mass,
+   * inertia, friction and restitution and restores them on the way back
+   * to dynamic — this is how a held slingshot bird can be pinned in place
+   * (ignoring gravity/collisions) and then launched with its original
+   * physical properties intact.
+   */
+  setStatic(entityId: EntityId, isStatic: boolean): void {
+    const body = this.entityToBody.get(entityId);
+    if (body) {
+      Matter.Body.setStatic(body, isStatic);
+    }
+  }
+
+  setPosition(entityId: EntityId, position: { x: number; y: number }): void {
+    const body = this.entityToBody.get(entityId);
+    if (body) {
+      Matter.Body.setPosition(body, position);
+    }
+  }
+
+  setVelocity(entityId: EntityId, velocity: { x: number; y: number }): void {
+    const body = this.entityToBody.get(entityId);
+    if (body) {
+      Matter.Body.setVelocity(body, velocity);
+    }
+  }
+
+  getPosition(entityId: EntityId): { x: number; y: number } | undefined {
+    const body = this.entityToBody.get(entityId);
+    return body ? { x: body.position.x, y: body.position.y } : undefined;
+  }
+
   getEntityForBody(bodyId: number): EntityId | undefined {
     return this.bodyIdToEntity.get(bodyId);
   }

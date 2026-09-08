@@ -6,4 +6,20 @@ export const GameConfig = {
   /** Clamp huge gaps (tab switches, debugger pauses) before they hit the accumulator. */
   maxFrameTimeMs: 250,
   gravity: { x: 0, y: 1 },
+  slingshot: {
+    /** Anchor x position as a fraction of canvas width. */
+    anchorXRatio: 0.18,
+    /** Anchor height above the ground surface, in world units. */
+    anchorYOffsetFromGround: 60,
+    postHeight: 90,
+    postSpacing: 22,
+    /** How far back the bird can be pulled from the anchor. */
+    maxDragDistance: 110,
+    /** Below this pull distance, releasing cancels the shot instead of launching. */
+    minDragDistance: 12,
+    /** Launch speed at full draw (Matter velocity units per fixed step). */
+    maxLaunchSpeed: 28,
+    /** How close a pointer-down must land to the bird to grab it. */
+    grabRadius: 45,
+  },
 } as const;

@@ -15,7 +15,7 @@ export function GameCanvas() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const engine = new GameEngine(ctx, canvas.clientWidth, canvas.clientHeight);
+    const engine = new GameEngine(canvas, canvas.clientWidth, canvas.clientHeight);
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
