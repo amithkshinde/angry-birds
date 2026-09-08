@@ -9,4 +9,5 @@ export const CollisionCategories = {
   BLOCK: 0x0004,
   GROUND: 0x0008,
   PIG: 0x0010,
+  DEBRIS: 0x0020,
 } as const;

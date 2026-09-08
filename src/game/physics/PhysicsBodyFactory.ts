@@ -57,3 +57,14 @@ export function createPigBody(x: number, y: number, def: PigDefinition): Matter.
     collisionFilter: { category: CollisionCategories.PIG },
   });
 }
+
+/** Small, cheap, non-damaging fragments spawned when a block breaks. */
+export function createDebrisBody(x: number, y: number, size: number): Matter.Body {
+  return Matter.Bodies.rectangle(x, y, size, size, {
+    friction: 0.4,
+    restitution: 0.3,
+    density: 0.004,
+    label: 'debris',
+    collisionFilter: { category: CollisionCategories.DEBRIS },
+  });
+}

@@ -7,6 +7,7 @@ import type { Transform } from '../components/Transform';
 import type { PhysicsBodyRef } from '../components/PhysicsBody';
 import type { RenderShape } from '../components/RenderShape';
 import type { MaterialTag } from '../components/MaterialTag';
+import type { Health } from '../components/Health';
 import type { EntityId } from '../Entity';
 
 export function createBlock(
@@ -32,6 +33,7 @@ export function createBlock(
     zIndex: 5,
   });
   entityManager.addComponent<MaterialTag>(id, Components.MaterialTag, { materialId: material.id });
+  entityManager.addComponent<Health>(id, Components.Health, { current: material.durability, max: material.durability });
 
   return id;
 }

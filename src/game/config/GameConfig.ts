@@ -28,4 +28,11 @@ export const GameConfig = {
     /** Impacts softer than this deal no damage — filters resting-contact jitter. */
     minImpactSpeedForDamage: 3,
   },
+  debris: {
+    count: 4,
+    ttlMs: 1500,
+    minSize: 6,
+    maxSize: 14,
+    speed: 6,
+  },
 } as const;

@@ -11,12 +11,15 @@ import { createGround } from './entities/factories/GroundFactory';
 import { createBlock } from './entities/factories/BlockFactory';
 import { createBird } from './entities/factories/BirdFactory';
 import { createPig } from './entities/factories/PigFactory';
+import { spawnDebris } from './entities/factories/DebrisFactory';
 import { InputController } from './input/InputController';
 import { SlingshotController } from './input/SlingshotController';
 import { WinLossEvaluator } from './level/WinLossEvaluator';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './GameEvents';
 import { Components } from './entities/ComponentTypes';
+import type { MaterialTag } from './entities/components/MaterialTag';
+import type { Lifecycle } from './entities/components/Lifecycle';
 import type { EntityId } from './entities/Entity';
 import type { Point } from './math/Point';
 
@@ -79,7 +82,7 @@ export class GameEngine {
     this.wireInput();
   }
 
-  /** Milestone 3 scene: ground, one wooden block, a pig perched on it, and a slingshot holding one bird. */
+  /** Milestone 4 scene: ground, one block of each material, a pig perched on wood, and a slingshot holding one bird. */
   private setupScene(width: number, height: number): SceneSetup {
     const groundHeight = 80;
     const groundTopY = height - groundHeight;
@@ -100,6 +103,24 @@ export class GameEngine {
     const blockY = groundTopY - blockHeight / 2;
 
     createBlock(this.entityManager, this.physicsWorld, MaterialDefinitions.wood, blockX, blockY, blockWidth, blockHeight);
+    createBlock(
+      this.entityManager,
+      this.physicsWorld,
+      MaterialDefinitions.ice,
+      blockX - 110,
+      blockY,
+      blockWidth,
+      blockHeight,
+    );
+    createBlock(
+      this.entityManager,
+      this.physicsWorld,
+      MaterialDefinitions.stone,
+      blockX + 110,
+      blockY,
+      blockWidth,
+      blockHeight,
+    );
 
     const pigDef = PigDefinitions.small;
     const pigX = blockX;
@@ -172,7 +193,7 @@ export class GameEngine {
       // Collision callbacks fired synchronously inside step() above; Matter
       // disallows mutating the world from within them, so entities marked
       // for death are only actually removed here, between steps.
-      this.processPendingRemovals();
+      this.processPendingRemovals(now);
       this.accumulator -= GameConfig.fixedDtMs;
       steps++;
     }
@@ -181,6 +202,7 @@ export class GameEngine {
     if (steps === GameConfig.maxStepsPerFrame) {
       this.accumulator = 0;
     }
+    this.cleanupExpiredDebris(now);
 
     const alpha = this.accumulator / GameConfig.fixedDtMs;
     this.updateFps(frameTime);
@@ -189,12 +211,33 @@ export class GameEngine {
     this.rafHandle = requestAnimationFrame(this.tick);
   };
 
-  private processPendingRemovals(): void {
+  private processPendingRemovals(now: number): void {
     const destroyedIds = this.collisionResolver.consumePendingRemovals();
     for (const entityId of destroyedIds) {
       if (this.entityManager.hasComponent(entityId, Components.PigTag)) {
         this.winLossEvaluator.notifyPigRemoved();
       }
+
+      const materialTag = this.entityManager.getComponent<MaterialTag>(entityId, Components.MaterialTag);
+      const material = materialTag ? MaterialDefinitions[materialTag.materialId] : undefined;
+      const position = this.physicsWorld.getPosition(entityId);
+      if (material && position) {
+        spawnDebris(this.entityManager, this.physicsWorld, position.x, position.y, material.color, now);
+      }
+
+      this.physicsWorld.removeBody(entityId);
+      this.entityManager.destroyEntity(entityId);
+    }
+  }
+
+  private cleanupExpiredDebris(now: number): void {
+    const expired: EntityId[] = [];
+    for (const [entityId, lifecycle] of this.entityManager.getAllWith<Lifecycle>(Components.Lifecycle)) {
+      if (now - lifecycle.spawnedAtMs >= lifecycle.ttlMs) {
+        expired.push(entityId);
+      }
+    }
+    for (const entityId of expired) {
       this.physicsWorld.removeBody(entityId);
       this.entityManager.destroyEntity(entityId);
     }

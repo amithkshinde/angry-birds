@@ -11,4 +11,5 @@ export const Components = {
   BirdTag: 'birdTag',
   PigTag: 'pigTag',
   Health: 'health',
+  Lifecycle: 'lifecycle',
 } as const;
