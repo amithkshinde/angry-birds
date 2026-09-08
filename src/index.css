@@ -23,3 +23,26 @@ body {
   overflow: hidden;
   background: #000;
 }
+
+/*
+ * Landscape lock for touch devices held in portrait: rather than relying
+ * on the Screen Orientation API (unsupported in iOS Safari, and only
+ * works from fullscreen elsewhere), rotate the whole app 90° via CSS and
+ * swap its box to the viewport's actual (swapped) dimensions. The app
+ * itself never knows it happened — GameEngine still sees a plain
+ * landscape-shaped canvas.
+ *
+ * gated on (pointer: coarse) so an actual desktop window resized to a
+ * tall, narrow shape is left alone — this only targets touchscreens.
+ */
+@media screen and (orientation: portrait) and (pointer: coarse) {
+  #root {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vh;
+    height: 100vw;
+    transform-origin: top left;
+    transform: translateX(100vw) rotate(90deg);
+  }
+}

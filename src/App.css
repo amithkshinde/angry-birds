@@ -1,5 +1,9 @@
 .app-root {
-  width: 100vw;
-  height: 100vh;
+  /* 100% of #root's own box, not the raw viewport — #root's box is
+     intentionally swapped from the real viewport under the portrait
+     landscape-lock in index.css, and this needs to follow that, not
+     the physical screen. */
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }

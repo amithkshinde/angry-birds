@@ -44,9 +44,18 @@ export class InputController {
     this.canvas.removeEventListener('pointercancel', this.handlePointerCancel);
   }
 
+  /**
+   * offsetX/offsetY (not clientX/Y minus getBoundingClientRect) — the
+   * browser computes these via real hit-testing against the target's own
+   * box, so they stay correct even when the canvas or an ancestor has a
+   * CSS transform applied (e.g. the landscape-lock rotation on mobile).
+   * A plain clientX - rect.left breaks under rotation: the bounding rect
+   * is axis-aligned in screen space, but the element's local axes aren't,
+   * so the subtraction silently maps to the wrong point — which reads
+   * exactly like "drag release launches in the wrong direction".
+   */
   private toLocalPoint(event: PointerEvent): Point {
-    const rect = this.canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    return { x: event.offsetX, y: event.offsetY };
   }
 
   private handlePointerDown = (event: PointerEvent): void => {
