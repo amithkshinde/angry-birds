@@ -35,4 +35,12 @@ export const GameConfig = {
     maxSize: 14,
     speed: 6,
   },
+  birds: {
+    /** Bird type ids for this level, in launch order; the first is loaded immediately. */
+    queue: ['red', 'red', 'red'],
+    /** Below this speed, an in-flight bird counts as settled and the next bird loads. */
+    settleSpeedThreshold: 0.6,
+    /** Safety cap so a bird that never quite settles doesn't stall the level forever. */
+    maxFlightTimeMs: 4000,
+  },
 } as const;

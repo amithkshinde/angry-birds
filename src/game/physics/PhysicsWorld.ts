@@ -80,6 +80,11 @@ export class PhysicsWorld {
     return body ? { x: body.position.x, y: body.position.y } : undefined;
   }
 
+  getVelocity(entityId: EntityId): { x: number; y: number } | undefined {
+    const body = this.entityToBody.get(entityId);
+    return body ? { x: body.velocity.x, y: body.velocity.y } : undefined;
+  }
+
   getEntityForBody(bodyId: number): EntityId | undefined {
     return this.bodyIdToEntity.get(bodyId);
   }

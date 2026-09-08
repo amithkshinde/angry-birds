@@ -3,25 +3,32 @@ import { GameEngine } from '../game/GameEngine';
 
 /**
  * The only file that bridges React and the imperative game engine. Owns
- * canvas sizing (including devicePixelRatio) and the engine's lifecycle;
- * nothing about physics or rendering internals leaks past this boundary.
- * The "level complete" banner is the one piece of coarse-grained state
- * React needs from the engine, delivered via a single low-frequency
- * EventBus subscription rather than any per-frame polling.
+ * canvas sizing (including devicePixelRatio) and the engine's lifecycle —
+ * including tearing one down and building a fresh one on Retry, which is
+ * also exactly what a level restart is. Win/loss are the two pieces of
+ * coarse-grained state React needs from the engine, each delivered via a
+ * single low-frequency EventBus subscription rather than per-frame polling.
  */
 export function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const engineRef = useRef<GameEngine | null>(null);
+  const cleanupRef = useRef<() => void>(() => {});
   const [levelWon, setLevelWon] = useState(false);
+  const [levelLost, setLevelLost] = useState(false);
 
-  useEffect(() => {
+  const startEngine = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     setLevelWon(false);
+    setLevelLost(false);
+
     const engine = new GameEngine(canvas, canvas.clientWidth, canvas.clientHeight);
-    const unsubscribeLevelWon = engine.onLevelWon(() => setLevelWon(true));
+    engineRef.current = engine;
+    const unsubscribeWon = engine.onLevelWon(() => setLevelWon(true));
+    const unsubscribeLost = engine.onLevelLost(() => setLevelLost(true));
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -37,12 +44,24 @@ export function GameCanvas() {
     engine.start();
     window.addEventListener('resize', resize);
 
-    return () => {
+    cleanupRef.current = () => {
       window.removeEventListener('resize', resize);
-      unsubscribeLevelWon();
+      unsubscribeWon();
+      unsubscribeLost();
       engine.dispose();
+      engineRef.current = null;
     };
+  };
+
+  useEffect(() => {
+    startEngine();
+    return () => cleanupRef.current();
   }, []);
+
+  const handleRetry = () => {
+    cleanupRef.current();
+    startEngine();
+  };
 
   return (
     <div style={containerStyle}>
@@ -52,7 +71,22 @@ export function GameCanvas() {
       />
       {levelWon && (
         <div style={overlayStyle}>
-          <div style={panelStyle}>Level Complete!</div>
+          <div style={panelStyle}>
+            <div>Level Complete!</div>
+            <button style={buttonStyle} onClick={handleRetry}>
+              Play Again
+            </button>
+          </div>
+        </div>
+      )}
+      {levelLost && (
+        <div style={overlayStyle}>
+          <div style={panelStyle}>
+            <div>Out of Birds!</div>
+            <button style={buttonStyle} onClick={handleRetry}>
+              Retry
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -72,11 +106,14 @@ const overlayStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   background: 'rgba(0, 0, 0, 0.35)',
-  pointerEvents: 'none',
 };
 
 const panelStyle: CSSProperties = {
-  padding: '20px 40px',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 16,
+  padding: '24px 40px',
   borderRadius: 12,
   background: 'rgba(255, 255, 255, 0.95)',
   color: '#2c3e50',
@@ -84,4 +121,16 @@ const panelStyle: CSSProperties = {
   fontSize: 28,
   fontWeight: 700,
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+};
+
+const buttonStyle: CSSProperties = {
+  padding: '10px 24px',
+  borderRadius: 8,
+  border: 'none',
+  background: '#e74c3c',
+  color: '#fff',
+  fontFamily: 'system-ui, sans-serif',
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: 'pointer',
 };

@@ -15,6 +15,7 @@ import { spawnDebris } from './entities/factories/DebrisFactory';
 import { InputController } from './input/InputController';
 import { SlingshotController } from './input/SlingshotController';
 import { WinLossEvaluator } from './level/WinLossEvaluator';
+import { BirdQueue } from './level/BirdQueue';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './GameEvents';
 import { Components } from './entities/ComponentTypes';
@@ -28,6 +29,8 @@ interface SceneSetup {
   anchor: Point;
   groundTopY: number;
   pigCount: number;
+  /** Bird type ids still to come after the one already loaded. */
+  remainingBirdTypeIds: string[];
 }
 
 /**
@@ -46,11 +49,19 @@ export class GameEngine {
   private slingshotController: SlingshotController;
   private collisionResolver: CollisionResolver;
   private winLossEvaluator: WinLossEvaluator;
+  private birdQueue: BirdQueue;
+  private anchor: Point;
 
   private running = false;
   private rafHandle = 0;
   private lastTime = 0;
   private accumulator = 0;
+
+  /** True once the level is won or lost — freezes further slingshot input. */
+  private gameOver = false;
+  /** Tracks the previous frame's in-flight state, to detect "just launched". */
+  private wasInFlight = false;
+  private flightStartMs = 0;
 
   private fps = 0;
   private fpsFrameCount = 0;
@@ -62,6 +73,8 @@ export class GameEngine {
 
     this.renderer = new Renderer(ctx, this.entityManager, width, height);
     const scene = this.setupScene(width, height);
+    this.anchor = scene.anchor;
+    this.birdQueue = new BirdQueue(scene.remainingBirdTypeIds);
 
     this.inputController = new InputController(canvas);
     this.slingshotController = new SlingshotController(
@@ -79,6 +92,12 @@ export class GameEngine {
       GameConfig.collision,
     );
     this.winLossEvaluator = new WinLossEvaluator(scene.pigCount, this.eventBus);
+    this.eventBus.on('level:won', () => {
+      this.gameOver = true;
+    });
+    this.eventBus.on('level:lost', () => {
+      this.gameOver = true;
+    });
     this.wireInput();
   }
 
@@ -131,27 +150,32 @@ export class GameEngine {
       x: width * GameConfig.slingshot.anchorXRatio,
       y: groundTopY - GameConfig.slingshot.anchorYOffsetFromGround,
     };
-    const birdId = createBird(this.entityManager, this.physicsWorld, BirdDefinitions.red, anchor.x, anchor.y);
+    const [firstBirdType, ...remainingBirdTypeIds] = GameConfig.birds.queue;
+    const birdId = createBird(this.entityManager, this.physicsWorld, BirdDefinitions[firstBirdType], anchor.x, anchor.y);
     // Held in the pouch: static until launched, so gravity and collisions
     // don't touch it while the player is aiming.
     this.physicsWorld.setStatic(birdId, true);
 
-    return { birdId, anchor, groundTopY, pigCount: 1 };
+    return { birdId, anchor, groundTopY, pigCount: 1, remainingBirdTypeIds };
   }
 
   private wireInput(): void {
     const toWorld = (point: Point) => this.renderer.camera.screenToWorld(point.x, point.y);
     this.inputController.setHandlers({
-      onDown: (point) => this.slingshotController.handlePointerDown(toWorld(point)),
-      onMove: (point) => this.slingshotController.handlePointerMove(toWorld(point)),
-      onUp: (point) => this.slingshotController.handlePointerUp(toWorld(point)),
-      onCancel: () => this.slingshotController.handlePointerCancel(),
+      onDown: (point) => !this.gameOver && this.slingshotController.handlePointerDown(toWorld(point)),
+      onMove: (point) => !this.gameOver && this.slingshotController.handlePointerMove(toWorld(point)),
+      onUp: (point) => !this.gameOver && this.slingshotController.handlePointerUp(toWorld(point)),
+      onCancel: () => !this.gameOver && this.slingshotController.handlePointerCancel(),
     });
   }
 
-  /** Narrow, read-only hook for the React shell to show a "level complete" screen — no engine internals leak out. */
+  /** Narrow, read-only hooks for the React shell to show end-of-level screens — no engine internals leak out. */
   onLevelWon(handler: () => void): () => void {
     return this.eventBus.on('level:won', handler);
+  }
+
+  onLevelLost(handler: () => void): () => void {
+    return this.eventBus.on('level:lost', handler);
   }
 
   start(): void {
@@ -203,10 +227,12 @@ export class GameEngine {
       this.accumulator = 0;
     }
     this.cleanupExpiredDebris(now);
+    this.updateBirdQueue(now);
 
     const alpha = this.accumulator / GameConfig.fixedDtMs;
     this.updateFps(frameTime);
-    this.renderer.render(alpha, this.fps, this.slingshotController.getVisual());
+    const birdsRemaining = this.birdQueue.remaining() + (this.slingshotController.isLoaded() ? 1 : 0);
+    this.renderer.render(alpha, this.fps, this.slingshotController.getVisual(), birdsRemaining);
 
     this.rafHandle = requestAnimationFrame(this.tick);
   };
@@ -241,6 +267,33 @@ export class GameEngine {
       this.physicsWorld.removeBody(entityId);
       this.entityManager.destroyEntity(entityId);
     }
+  }
+
+  /** Detects when the currently-launched bird has settled (or timed out) and loads the next one. */
+  private updateBirdQueue(now: number): void {
+    if (this.gameOver) return;
+
+    const inFlight = this.slingshotController.isInFlight();
+    if (inFlight && !this.wasInFlight) {
+      this.flightStartMs = now;
+    }
+    this.wasInFlight = inFlight;
+    if (!inFlight) return;
+
+    const velocity = this.physicsWorld.getVelocity(this.slingshotController.getBirdId());
+    const speed = velocity ? Math.hypot(velocity.x, velocity.y) : 0;
+    const settled = speed < GameConfig.birds.settleSpeedThreshold;
+    const timedOut = now - this.flightStartMs > GameConfig.birds.maxFlightTimeMs;
+    if (!settled && !timedOut) return;
+
+    const nextBirdType = this.birdQueue.next();
+    if (nextBirdType === undefined) {
+      this.winLossEvaluator.notifyBirdsExhausted();
+      return;
+    }
+    const birdId = createBird(this.entityManager, this.physicsWorld, BirdDefinitions[nextBirdType], this.anchor.x, this.anchor.y);
+    this.physicsWorld.setStatic(birdId, true);
+    this.slingshotController.loadBird(birdId);
   }
 
   private updateFps(frameTimeMs: number): void {

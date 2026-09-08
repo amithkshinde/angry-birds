@@ -100,6 +100,21 @@ export class SlingshotController {
     return this.state !== 'launched';
   }
 
+  isInFlight(): boolean {
+    return this.state === 'launched';
+  }
+
+  getBirdId(): EntityId {
+    return this.birdId;
+  }
+
+  /** Swap in a freshly-created bird after the previous one has settled, resetting to Idle. */
+  loadBird(birdId: EntityId): void {
+    this.birdId = birdId;
+    this.state = 'idle';
+    this.setBirdPosition(this.anchor);
+  }
+
   getVisual(): SlingshotVisual {
     const transform = this.isLoaded()
       ? this.entityManager.getComponent<Transform>(this.birdId, Components.Transform)

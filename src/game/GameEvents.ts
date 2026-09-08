@@ -8,4 +8,5 @@ import type { EntityId } from './entities/Entity';
 export interface GameEvents {
   'entity:destroyed': { entityId: EntityId };
   'level:won': Record<string, never>;
+  'level:lost': Record<string, never>;
 }
