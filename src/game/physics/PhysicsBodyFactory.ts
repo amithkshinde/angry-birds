@@ -40,6 +40,10 @@ export function createBirdBody(x: number, y: number, def: BirdDefinition): Matte
   const body = Matter.Bodies.circle(x, y, def.radius, {
     friction: def.friction,
     restitution: def.restitution,
+    // Slightly below Matter's 0.01 default: a launched bird carries its
+    // speed a bit further through the air, so pulls translate into a
+    // punchier, more confident-feeling arc instead of visibly decaying.
+    frictionAir: 0.008,
     label: 'bird',
     collisionFilter: { category: CollisionCategories.BIRD },
   });

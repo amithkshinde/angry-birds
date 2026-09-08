@@ -4,12 +4,14 @@ import type { EntityId } from '../entities/Entity';
 import { Components } from '../entities/ComponentTypes';
 import type { Transform } from '../entities/components/Transform';
 import type { Point } from '../math/Point';
+import type { PointerKind } from './InputController';
 
 export interface SlingshotConfig {
   maxDragDistance: number;
   minDragDistance: number;
   maxLaunchSpeed: number;
   grabRadius: number;
+  touchGrabRadiusMultiplier: number;
   postSpacing: number;
   postHeight: number;
 }
@@ -67,12 +69,14 @@ export class SlingshotController {
     };
   }
 
-  handlePointerDown(worldPoint: Point): void {
+  handlePointerDown(worldPoint: Point, pointerKind: PointerKind = 'mouse'): void {
     if (this.state !== 'idle') return;
     const transform = this.entityManager.getComponent<Transform>(this.birdId, Components.Transform);
     if (!transform) return;
     const distanceToBird = Math.hypot(worldPoint.x - transform.x, worldPoint.y - transform.y);
-    if (distanceToBird <= this.config.grabRadius) {
+    const grabRadius =
+      pointerKind === 'touch' ? this.config.grabRadius * this.config.touchGrabRadiusMultiplier : this.config.grabRadius;
+    if (distanceToBird <= grabRadius) {
       this.state = 'dragging';
       this.moveBirdTo(worldPoint);
     }

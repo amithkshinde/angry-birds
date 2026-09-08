@@ -21,12 +21,16 @@ export const GameConfig = {
     maxLaunchSpeed: 28,
     /** How close a pointer-down must land to the bird to grab it. */
     grabRadius: 45,
+    /** Touch fingertips are far less precise than a mouse cursor, so touch gets a bigger forgiving grab zone. */
+    touchGrabRadiusMultiplier: 1.4,
   },
   collision: {
     /** Damage dealt per unit of impact speed on a new physics contact. */
     damagePerImpactSpeed: 2.5,
     /** Impacts softer than this deal no damage — filters resting-contact jitter. */
     minImpactSpeedForDamage: 3,
+    /** Lower bar than damage: even a non-damaging bump gets a small dust puff + shake. */
+    minImpactSpeedForFeedback: 2,
   },
   debris: {
     count: 4,
@@ -40,5 +44,19 @@ export const GameConfig = {
     settleSpeedThreshold: 0.6,
     /** Safety cap so a bird that never quite settles doesn't stall the level forever. */
     maxFlightTimeMs: 4000,
+  },
+  trail: {
+    maxPoints: 16,
+  },
+  fx: {
+    /** Screen-shake trauma added per event, escalating with significance. */
+    shake: {
+      impact: 0.1,
+      hit: 0.2,
+      destroy: 0.4,
+    },
+    dustParticleCount: 5,
+    hitBurstCount: 8,
+    destroyBurstCount: 14,
   },
 } as const;

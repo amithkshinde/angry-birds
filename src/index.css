@@ -11,6 +11,14 @@ body,
   height: 100%;
 }
 
+html,
+body {
+  /* Stops iOS/Android pull-to-refresh and rubber-band scrolling from
+     hijacking a slingshot drag that starts near a screen edge. */
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 body {
   overflow: hidden;
   background: #000;

@@ -5,6 +5,7 @@ import type { GameEvents } from '../GameEvents';
 import { Components } from '../entities/ComponentTypes';
 import type { Health } from '../entities/components/Health';
 import type { EntityId } from '../entities/Entity';
+import type { Point } from '../math/Point';
 
 export interface CollisionResolverConfig {
   /** Damage dealt per unit of impact speed. */
@@ -13,12 +14,19 @@ export interface CollisionResolverConfig {
   minImpactSpeedForDamage: number;
 }
 
+interface PendingRemoval {
+  entityId: EntityId;
+  position: Point;
+}
+
 /**
  * Converts raw physics contacts into game damage. Any entity carrying a
  * Health component takes damage proportional to the impact speed of
  * whatever it collided with — bird, block, or ground alike — so the same
  * rule will cover damageable structures once they get a Health component
- * too, with no changes needed here.
+ * too, with no changes needed here. Every damage application (fatal or
+ * not) fires 'entity:hit' so VFX (screen shake, hit sparks) can react to
+ * a solid but non-lethal hit just as much as a kill.
  *
  * Matter disallows mutating the world from inside a collision callback,
  * so this only marks entities for removal; the engine actually removes
@@ -26,7 +34,7 @@ export interface CollisionResolverConfig {
  */
 export class CollisionResolver {
   private readonly unsubscribe: () => void;
-  private pendingRemoval = new Set<EntityId>();
+  private pendingRemoval = new Map<EntityId, Point>();
 
   constructor(
     private entityManager: EntityManager,
@@ -41,33 +49,34 @@ export class CollisionResolver {
     this.unsubscribe();
   }
 
-  /** Entities whose health hit zero since the last call; clears the queue. */
-  consumePendingRemovals(): EntityId[] {
-    const ids = Array.from(this.pendingRemoval);
+  /** Entities whose health hit zero since the last call, with the position they died at; clears the queue. */
+  consumePendingRemovals(): PendingRemoval[] {
+    const removals = Array.from(this.pendingRemoval, ([entityId, position]) => ({ entityId, position }));
     this.pendingRemoval.clear();
-    return ids;
+    return removals;
   }
 
   private handleContacts(contacts: CollisionContact[]): void {
     for (const contact of contacts) {
       if (contact.impactSpeed < this.config.minImpactSpeedForDamage) continue;
       const damage = contact.impactSpeed * this.config.damagePerImpactSpeed;
-      this.applyDamage(contact.entityA, damage);
-      this.applyDamage(contact.entityB, damage);
+      this.applyDamage(contact.entityA, damage, contact.position, contact.impactSpeed);
+      this.applyDamage(contact.entityB, damage, contact.position, contact.impactSpeed);
     }
   }
 
-  private applyDamage(entityId: EntityId | undefined, amount: number): void {
+  private applyDamage(entityId: EntityId | undefined, amount: number, position: Point, impactSpeed: number): void {
     if (entityId === undefined) return;
     const health = this.entityManager.getComponent<Health>(entityId, Components.Health);
     if (!health) return;
 
     const nextHealth: Health = { ...health, current: health.current - amount };
     this.entityManager.addComponent<Health>(entityId, Components.Health, nextHealth);
+    this.eventBus.emit('entity:hit', { entityId, position, impactSpeed });
 
     if (nextHealth.current <= 0 && !this.pendingRemoval.has(entityId)) {
-      this.pendingRemoval.add(entityId);
-      this.eventBus.emit('entity:destroyed', { entityId });
+      this.pendingRemoval.set(entityId, position);
+      this.eventBus.emit('entity:destroyed', { entityId, position });
     }
   }
 }

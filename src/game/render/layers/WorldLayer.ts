@@ -3,13 +3,18 @@ import type { Camera } from '../../camera/Camera';
 import { Components } from '../../entities/ComponentTypes';
 import type { Transform } from '../../entities/components/Transform';
 import type { RenderShape } from '../../entities/components/RenderShape';
+import type { Lifecycle } from '../../entities/components/Lifecycle';
 import { interpolateTransform } from '../Interpolation';
+
+/** Lifecycle-bound entities (debris) fade out over their last stretch of life instead of popping out of existence. */
+const FADE_OUT_MS = 350;
 
 export function drawWorldLayer(
   ctx: CanvasRenderingContext2D,
   entityManager: EntityManager,
   camera: Camera,
   alpha: number,
+  nowMs: number,
 ): void {
   const shapes = entityManager.getAllWith<RenderShape>(Components.RenderShape);
   const drawOrder = Array.from(shapes.entries()).sort((a, b) => a[1].zIndex - b[1].zIndex);
@@ -21,7 +26,15 @@ export function drawWorldLayer(
     const interpolated = interpolateTransform(prev, curr, alpha);
     const screen = camera.worldToScreen(interpolated.x, interpolated.y);
 
+    const lifecycle = entityManager.getComponent<Lifecycle>(entityId, Components.Lifecycle);
+    let opacity = 1;
+    if (lifecycle) {
+      const remaining = lifecycle.ttlMs - (nowMs - lifecycle.spawnedAtMs);
+      opacity = Math.max(0, Math.min(1, remaining / FADE_OUT_MS));
+    }
+
     ctx.save();
+    ctx.globalAlpha = opacity;
     ctx.translate(screen.x, screen.y);
     ctx.rotate(interpolated.angle);
     ctx.fillStyle = shape.color;

@@ -1,5 +1,6 @@
 import { EntityManager } from './entities/EntityManager';
 import { PhysicsWorld } from './physics/PhysicsWorld';
+import type { CollisionContact } from './physics/PhysicsWorld';
 import { capturePreviousTransforms, syncTransformsFromPhysics } from './physics/PhysicsSync';
 import { CollisionResolver } from './physics/CollisionResolver';
 import { Renderer } from './render/Renderer';
@@ -16,8 +17,10 @@ import { buildLevel } from './level/LevelBuilder';
 import type { LevelDefinition } from './level/LevelSchema';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './GameEvents';
+import { ParticleSystem } from './fx/ParticleSystem';
 import { Components } from './entities/ComponentTypes';
 import type { MaterialTag } from './entities/components/MaterialTag';
+import type { BirdTag } from './entities/components/BirdTag';
 import type { Lifecycle } from './entities/components/Lifecycle';
 import type { EntityId } from './entities/Entity';
 import type { Point } from './math/Point';
@@ -26,13 +29,16 @@ import type { Point } from './math/Point';
  * Owns the fixed-timestep accumulator loop: steps Matter.js at a constant
  * rate regardless of display refresh rate, and renders every animation
  * frame with the leftover fraction used to interpolate positions smoothly.
- * Also owns input (translating pointer events into slingshot actions) and
- * the collision -> damage -> win/loss pipeline.
+ * Also owns input (translating pointer events into slingshot actions), the
+ * collision -> damage -> win/loss pipeline, and the juice layered on top of
+ * it (screen shake, particles, bird trail) that makes hits and kills read
+ * as impactful rather than just "the numbers changed".
  */
 export class GameEngine {
   private entityManager = new EntityManager();
   private physicsWorld = new PhysicsWorld(GameConfig.gravity);
   private eventBus = new EventBus<GameEvents>();
+  private particleSystem = new ParticleSystem();
   private renderer: Renderer;
   private inputController: InputController;
   private slingshotController: SlingshotController;
@@ -40,6 +46,7 @@ export class GameEngine {
   private winLossEvaluator: WinLossEvaluator;
   private birdQueue: BirdQueue;
   private anchor: Point;
+  private unsubscribeImpactFx: () => void;
 
   private running = false;
   private rafHandle = 0;
@@ -51,6 +58,8 @@ export class GameEngine {
   /** Tracks the previous frame's in-flight state, to detect "just launched". */
   private wasInFlight = false;
   private flightStartMs = 0;
+  /** Recent world-space positions of the in-flight bird, oldest first — the trail. */
+  private trailPoints: Point[] = [];
 
   private fps = 0;
   private fpsFrameCount = 0;
@@ -87,13 +96,29 @@ export class GameEngine {
     this.eventBus.on('level:lost', () => {
       this.gameOver = true;
     });
+
+    // Pure-VFX reaction to every solid physics contact — independent of
+    // CollisionResolver's damage pipeline, so even a non-damaging bounce
+    // (bird off stone, a block landing on the ground) gets a puff of dust
+    // and a light tap of shake.
+    this.unsubscribeImpactFx = this.physicsWorld.onCollisionStart((contacts) => this.handleImpactContacts(contacts));
+    // A hit that actually damaged something gets a bigger, colored burst —
+    // scaled again, harder, the moment that hit is fatal (see
+    // processPendingRemovals). Three escalating tiers: bump, hit, kill.
+    this.eventBus.on('entity:hit', ({ entityId, position, impactSpeed }) => {
+      const color = this.colorForEntity(entityId) ?? '#ffffff';
+      this.particleSystem.spawnBurst(position.x, position.y, color, GameConfig.fx.hitBurstCount);
+      this.particleSystem.spawnRing(position.x, position.y, '#ffffff', 26);
+      this.renderer.camera.shake.addTrauma(GameConfig.fx.shake.hit * Math.min(1, impactSpeed / 20));
+    });
+
     this.wireInput();
   }
 
   private wireInput(): void {
     const toWorld = (point: Point) => this.renderer.camera.screenToWorld(point.x, point.y);
     this.inputController.setHandlers({
-      onDown: (point) => !this.gameOver && this.slingshotController.handlePointerDown(toWorld(point)),
+      onDown: (point, kind) => !this.gameOver && this.slingshotController.handlePointerDown(toWorld(point), kind),
       onMove: (point) => !this.gameOver && this.slingshotController.handlePointerMove(toWorld(point)),
       onUp: (point) => !this.gameOver && this.slingshotController.handlePointerUp(toWorld(point)),
       onCancel: () => !this.gameOver && this.slingshotController.handlePointerCancel(),
@@ -129,6 +154,7 @@ export class GameEngine {
     this.stop();
     this.inputController.dispose();
     this.collisionResolver.dispose();
+    this.unsubscribeImpactFx();
     this.physicsWorld.dispose();
   }
 
@@ -159,28 +185,67 @@ export class GameEngine {
     }
     this.cleanupExpiredDebris(now);
     this.updateBirdQueue(now);
+    this.updateTrail();
+    this.particleSystem.update(now, frameTime);
 
     const alpha = this.accumulator / GameConfig.fixedDtMs;
     this.updateFps(frameTime);
     const birdsRemaining = this.birdQueue.remaining() + (this.slingshotController.isLoaded() ? 1 : 0);
-    this.renderer.render(alpha, this.fps, this.slingshotController.getVisual(), birdsRemaining);
+    const trailStyle = this.getTrailStyle();
+
+    this.renderer.render({
+      alpha,
+      fps: this.fps,
+      nowMs: now,
+      frameTimeMs: frameTime,
+      slingshotVisual: this.slingshotController.getVisual(),
+      birdsRemaining,
+      trail: this.trailPoints.length > 0 ? { points: this.trailPoints, ...trailStyle } : null,
+      particles: this.particleSystem.getParticles(),
+    });
 
     this.rafHandle = requestAnimationFrame(this.tick);
   };
 
+  /** Dust puff + light shake on every solid contact, damaging or not — the ambient "physics feels weighty" layer. */
+  private handleImpactContacts(contacts: CollisionContact[]): void {
+    for (const contact of contacts) {
+      if (contact.impactSpeed < GameConfig.collision.minImpactSpeedForFeedback) continue;
+      const color = this.colorForEntity(contact.entityA) ?? this.colorForEntity(contact.entityB) ?? '#d8d8d8';
+      this.particleSystem.spawnDust(contact.position.x, contact.position.y, color, GameConfig.fx.dustParticleCount);
+      this.renderer.camera.shake.addTrauma(GameConfig.fx.shake.impact * Math.min(1, contact.impactSpeed / 20));
+    }
+  }
+
+  /** A material's color for a block, a fixed color for pigs/birds, or undefined for ground/debris. */
+  private colorForEntity(entityId: EntityId | undefined): string | undefined {
+    if (entityId === undefined) return undefined;
+    const materialTag = this.entityManager.getComponent<MaterialTag>(entityId, Components.MaterialTag);
+    if (materialTag) return MaterialDefinitions[materialTag.materialId]?.color;
+    if (this.entityManager.hasComponent(entityId, Components.PigTag)) return '#6ab04c';
+    if (this.entityManager.hasComponent(entityId, Components.BirdTag)) return '#d64541';
+    return undefined;
+  }
+
   private processPendingRemovals(now: number): void {
-    const destroyedIds = this.collisionResolver.consumePendingRemovals();
-    for (const entityId of destroyedIds) {
+    const destroyed = this.collisionResolver.consumePendingRemovals();
+    for (const { entityId, position } of destroyed) {
       if (this.entityManager.hasComponent(entityId, Components.PigTag)) {
         this.winLossEvaluator.notifyPigRemoved();
       }
 
       const materialTag = this.entityManager.getComponent<MaterialTag>(entityId, Components.MaterialTag);
       const material = materialTag ? MaterialDefinitions[materialTag.materialId] : undefined;
-      const position = this.physicsWorld.getPosition(entityId);
-      if (material && position) {
+      if (material) {
         spawnDebris(this.entityManager, this.physicsWorld, position.x, position.y, material.color, now);
       }
+
+      // The kill gets the loudest feedback of the three tiers — a bigger,
+      // longer burst, a wider shockwave ring, and the hardest shake.
+      const color = material?.color ?? this.colorForEntity(entityId) ?? '#ffffff';
+      this.particleSystem.spawnBurst(position.x, position.y, color, GameConfig.fx.destroyBurstCount);
+      this.particleSystem.spawnRing(position.x, position.y, color, 40);
+      this.renderer.camera.shake.addTrauma(GameConfig.fx.shake.destroy);
 
       this.physicsWorld.removeBody(entityId);
       this.entityManager.destroyEntity(entityId);
@@ -225,6 +290,26 @@ export class GameEngine {
     const birdId = createBird(this.entityManager, this.physicsWorld, BirdDefinitions[nextBirdType], this.anchor.x, this.anchor.y);
     this.physicsWorld.setStatic(birdId, true);
     this.slingshotController.loadBird(birdId);
+  }
+
+  /** Samples the in-flight bird's position into the trail; clears it the instant the bird isn't flying. */
+  private updateTrail(): void {
+    if (!this.slingshotController.isInFlight()) {
+      if (this.trailPoints.length > 0) this.trailPoints = [];
+      return;
+    }
+    const position = this.physicsWorld.getPosition(this.slingshotController.getBirdId());
+    if (!position) return;
+    this.trailPoints.push(position);
+    if (this.trailPoints.length > GameConfig.trail.maxPoints) {
+      this.trailPoints.shift();
+    }
+  }
+
+  private getTrailStyle(): { color: string; radius: number } {
+    const birdTag = this.entityManager.getComponent<BirdTag>(this.slingshotController.getBirdId(), Components.BirdTag);
+    const def = birdTag ? BirdDefinitions[birdTag.birdTypeId] : undefined;
+    return { color: def?.color ?? '#d64541', radius: def?.radius ?? 20 };
   }
 
   private updateFps(frameTimeMs: number): void {

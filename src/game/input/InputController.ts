@@ -1,10 +1,16 @@
 import type { Point } from '../math/Point';
 
+export type PointerKind = 'mouse' | 'touch' | 'pen';
+
 export interface InputHandlers {
-  onDown?: (point: Point) => void;
-  onMove?: (point: Point) => void;
-  onUp?: (point: Point) => void;
+  onDown?: (point: Point, pointerKind: PointerKind) => void;
+  onMove?: (point: Point, pointerKind: PointerKind) => void;
+  onUp?: (point: Point, pointerKind: PointerKind) => void;
   onCancel?: () => void;
+}
+
+function toPointerKind(type: string): PointerKind {
+  return type === 'touch' || type === 'pen' ? type : 'mouse';
 }
 
 /**
@@ -12,7 +18,9 @@ export interface InputHandlers {
  * Events, exposing canvas-local (CSS-pixel) coordinates. Only one active
  * pointer is tracked at a time, which is all a one-bird-at-a-time slingshot
  * needs; pointer capture keeps a drag tracking correctly even if it leaves
- * the canvas bounds before release.
+ * the canvas bounds before release. The input's pointerType is passed
+ * through too, since touch input deserves a more forgiving hit-test than
+ * a precise mouse cursor.
  */
 export class InputController {
   private handlers: InputHandlers = {};
@@ -54,20 +62,20 @@ export class InputController {
       // Ignored — see comment above.
     }
     event.preventDefault();
-    this.handlers.onDown?.(this.toLocalPoint(event));
+    this.handlers.onDown?.(this.toLocalPoint(event), toPointerKind(event.pointerType));
   };
 
   private handlePointerMove = (event: PointerEvent): void => {
     if (event.pointerId !== this.activePointerId) return;
     event.preventDefault();
-    this.handlers.onMove?.(this.toLocalPoint(event));
+    this.handlers.onMove?.(this.toLocalPoint(event), toPointerKind(event.pointerType));
   };
 
   private handlePointerUp = (event: PointerEvent): void => {
     if (event.pointerId !== this.activePointerId) return;
     this.activePointerId = null;
     event.preventDefault();
-    this.handlers.onUp?.(this.toLocalPoint(event));
+    this.handlers.onUp?.(this.toLocalPoint(event), toPointerKind(event.pointerType));
   };
 
   private handlePointerCancel = (event: PointerEvent): void => {

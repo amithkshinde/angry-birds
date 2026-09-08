@@ -7,6 +7,8 @@ export interface CollisionContact {
   entityB: EntityId | undefined;
   /** Relative speed between the two bodies at the moment contact began. */
   impactSpeed: number;
+  /** Midpoint between the two bodies — good enough for placing impact VFX. */
+  position: { x: number; y: number };
 }
 
 /**
@@ -23,6 +25,9 @@ export class PhysicsWorld {
     this.engine = Matter.Engine.create();
     this.engine.gravity.x = gravity.x;
     this.engine.gravity.y = gravity.y;
+    // Settled bodies (landed birds, rubble) go fully to sleep instead of
+    // micro-jittering forever — cheaper, and visibly calmer once things land.
+    this.engine.enableSleeping = true;
   }
 
   step(fixedDtMs: number): void {
@@ -102,6 +107,10 @@ export class PhysicsWorld {
         entityA: this.bodyIdToEntity.get(pair.bodyA.id),
         entityB: this.bodyIdToEntity.get(pair.bodyB.id),
         impactSpeed: Matter.Vector.magnitude(Matter.Vector.sub(pair.bodyA.velocity, pair.bodyB.velocity)),
+        position: {
+          x: (pair.bodyA.position.x + pair.bodyB.position.x) / 2,
+          y: (pair.bodyA.position.y + pair.bodyB.position.y) / 2,
+        },
       }));
       handler(contacts);
     };

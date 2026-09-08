@@ -15,7 +15,7 @@ export const BirdDefinitions: Record<string, BirdDefinition> = {
     id: 'red',
     mass: 5,
     radius: 22,
-    restitution: 0.35,
+    restitution: 0.42,
     friction: 0.5,
     color: '#d64541',
     baseDamage: 10,

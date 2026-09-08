@@ -80,7 +80,15 @@ export function GameCanvas({ levelId, onFinish }: Props) {
     <div style={containerStyle}>
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', display: 'block', touchAction: 'none' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          touchAction: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+          WebkitTouchCallout: 'none',
+        }}
       />
       {levelWon && (
         <div style={overlayStyle}>
@@ -157,7 +165,8 @@ const buttonRowStyle: CSSProperties = {
 };
 
 const buttonStyle: CSSProperties = {
-  padding: '10px 20px',
+  // Padded to a ~44px min touch target height, per mobile tap-target guidance.
+  padding: '14px 24px',
   borderRadius: 8,
   border: 'none',
   background: '#e74c3c',
