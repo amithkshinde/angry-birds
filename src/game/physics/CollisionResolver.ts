@@ -49,6 +49,17 @@ export class CollisionResolver {
     this.unsubscribe();
   }
 
+  /**
+   * Entry point for damage that didn't come from a physics contact (e.g.
+   * an explosion ability) but should go through exactly the same
+   * health/death/VFX pipeline as a collision would — same 'entity:hit'
+   * and 'entity:destroyed' events, same pending-removal queue GameEngine
+   * already drains every step.
+   */
+  applyExternalDamage(entityId: EntityId, amount: number, position: Point, impactSpeed = 0): void {
+    this.applyDamage(entityId, amount, position, impactSpeed);
+  }
+
   /** Entities whose health hit zero since the last call, with the position they died at; clears the queue. */
   consumePendingRemovals(): PendingRemoval[] {
     const removals = Array.from(this.pendingRemoval, ([entityId, position]) => ({ entityId, position }));

@@ -1,7 +1,7 @@
 {
   "id": "level-03",
   "name": "Triple Threat",
-  "birds": ["red", "red", "red"],
+  "birds": ["red", "yellow", "black"],
   "blocks": [
     { "material": "wood", "xRatio": 0.5, "yFromGround": 30, "width": 60, "height": 60 },
     { "material": "ice", "xRatio": 0.62, "yFromGround": 30, "width": 60, "height": 60 },

@@ -18,10 +18,12 @@ import type { LevelDefinition } from './level/LevelSchema';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './GameEvents';
 import { ParticleSystem } from './fx/ParticleSystem';
+import { AbilityManager } from './birds/AbilityManager';
 import { Components } from './entities/ComponentTypes';
 import type { MaterialTag } from './entities/components/MaterialTag';
 import type { BirdTag } from './entities/components/BirdTag';
 import type { Lifecycle } from './entities/components/Lifecycle';
+import type { SpeedBoosted } from './entities/components/SpeedBoosted';
 import type { EntityId } from './entities/Entity';
 import type { Point } from './math/Point';
 
@@ -29,10 +31,10 @@ import type { Point } from './math/Point';
  * Owns the fixed-timestep accumulator loop: steps Matter.js at a constant
  * rate regardless of display refresh rate, and renders every animation
  * frame with the leftover fraction used to interpolate positions smoothly.
- * Also owns input (translating pointer events into slingshot actions), the
- * collision -> damage -> win/loss pipeline, and the juice layered on top of
- * it (screen shake, particles, bird trail) that makes hits and kills read
- * as impactful rather than just "the numbers changed".
+ * Also owns input (translating pointer events into slingshot actions and
+ * ability taps), the collision -> damage -> win/loss pipeline, the bird
+ * ability system, and the juice layered on top of it all (screen shake,
+ * particles, bird trail).
  */
 export class GameEngine {
   private entityManager = new EntityManager();
@@ -44,6 +46,7 @@ export class GameEngine {
   private slingshotController: SlingshotController;
   private collisionResolver: CollisionResolver;
   private winLossEvaluator: WinLossEvaluator;
+  private abilityManager: AbilityManager;
   private birdQueue: BirdQueue;
   private anchor: Point;
   private unsubscribeImpactFx: () => void;
@@ -53,7 +56,7 @@ export class GameEngine {
   private lastTime = 0;
   private accumulator = 0;
 
-  /** True once the level is won or lost — freezes further slingshot input. */
+  /** True once the level is won or lost — freezes further slingshot/ability input. */
   private gameOver = false;
   /** Tracks the previous frame's in-flight state, to detect "just launched". */
   private wasInFlight = false;
@@ -90,6 +93,15 @@ export class GameEngine {
       GameConfig.collision,
     );
     this.winLossEvaluator = new WinLossEvaluator(scene.pigCount, this.eventBus);
+    this.abilityManager = new AbilityManager({
+      entityManager: this.entityManager,
+      physicsWorld: this.physicsWorld,
+      collisionResolver: this.collisionResolver,
+      eventBus: this.eventBus,
+      particleSystem: this.particleSystem,
+      camera: this.renderer.camera,
+      spawnFreeBird: (birdTypeId, x, y, velocity) => this.spawnFreeBird(birdTypeId, x, y, velocity),
+    });
     this.eventBus.on('level:won', () => {
       this.gameOver = true;
     });
@@ -105,6 +117,8 @@ export class GameEngine {
     // A hit that actually damaged something gets a bigger, colored burst —
     // scaled again, harder, the moment that hit is fatal (see
     // processPendingRemovals). Three escalating tiers: bump, hit, kill.
+    // This also covers Black's explosion damage, which is routed through
+    // the same applyExternalDamage -> 'entity:hit' path.
     this.eventBus.on('entity:hit', ({ entityId, position, impactSpeed }) => {
       const color = this.colorForEntity(entityId) ?? '#ffffff';
       this.particleSystem.spawnBurst(position.x, position.y, color, GameConfig.fx.hitBurstCount);
@@ -115,10 +129,27 @@ export class GameEngine {
     this.wireInput();
   }
 
+  /** Creates an independent, already-flying bird — used by abilities (Blue's split children), not the slingshot. */
+  private spawnFreeBird(birdTypeId: string, x: number, y: number, velocity: Point): EntityId {
+    const id = createBird(this.entityManager, this.physicsWorld, BirdDefinitions[birdTypeId], x, y);
+    this.physicsWorld.setVelocity(id, velocity);
+    return id;
+  }
+
   private wireInput(): void {
     const toWorld = (point: Point) => this.renderer.camera.screenToWorld(point.x, point.y);
     this.inputController.setHandlers({
-      onDown: (point, kind) => !this.gameOver && this.slingshotController.handlePointerDown(toWorld(point), kind),
+      onDown: (point, kind) => {
+        if (this.gameOver) return;
+        // Ability activation only ever applies to an already-launched
+        // bird — this is also what guarantees it can never fire while a
+        // bird is still attached to the slingshot (idle/dragging).
+        if (this.slingshotController.isInFlight()) {
+          this.abilityManager.tryActivate(this.slingshotController.getBirdId(), performance.now());
+          return;
+        }
+        this.slingshotController.handlePointerDown(toWorld(point), kind);
+      },
       onMove: (point) => !this.gameOver && this.slingshotController.handlePointerMove(toWorld(point)),
       onUp: (point) => !this.gameOver && this.slingshotController.handlePointerUp(toWorld(point)),
       onCancel: () => !this.gameOver && this.slingshotController.handlePointerCancel(),
@@ -184,6 +215,15 @@ export class GameEngine {
       this.accumulator = 0;
     }
     this.cleanupExpiredDebris(now);
+
+    // Passive abilities (Black's auto-explode-after-rest) only apply once
+    // a bird is actually airborne — never while still held in the pouch.
+    if (this.slingshotController.isInFlight()) {
+      this.abilityManager.updateActive(this.slingshotController.getBirdId(), now);
+    }
+    // Catch any removal an ability triggered this frame (e.g. an
+    // explosion) immediately, rather than waiting for the next physics step.
+    this.processPendingRemovals(now);
     this.updateBirdQueue(now);
     this.updateTrail();
     this.particleSystem.update(now, frameTime);
@@ -191,7 +231,7 @@ export class GameEngine {
     const alpha = this.accumulator / GameConfig.fixedDtMs;
     this.updateFps(frameTime);
     const birdsRemaining = this.birdQueue.remaining() + (this.slingshotController.isLoaded() ? 1 : 0);
-    const trailStyle = this.getTrailStyle();
+    const trailStyle = this.getTrailStyle(now);
 
     this.renderer.render({
       alpha,
@@ -265,7 +305,7 @@ export class GameEngine {
     }
   }
 
-  /** Detects when the currently-launched bird has settled (or timed out) and loads the next one. */
+  /** Detects when the currently-launched bird has settled (or timed out, or been removed by its own ability) and loads the next one. */
   private updateBirdQueue(now: number): void {
     if (this.gameOver) return;
 
@@ -276,6 +316,8 @@ export class GameEngine {
     this.wasInFlight = inFlight;
     if (!inFlight) return;
 
+    // A destroyed bird (e.g. Black's explosion) has no velocity to read —
+    // that reads as "settled" here, which is exactly the reload behavior we want.
     const velocity = this.physicsWorld.getVelocity(this.slingshotController.getBirdId());
     const speed = velocity ? Math.hypot(velocity.x, velocity.y) : 0;
     const settled = speed < GameConfig.birds.settleSpeedThreshold;
@@ -306,10 +348,18 @@ export class GameEngine {
     }
   }
 
-  private getTrailStyle(): { color: string; radius: number } {
-    const birdTag = this.entityManager.getComponent<BirdTag>(this.slingshotController.getBirdId(), Components.BirdTag);
+  private getTrailStyle(now: number): { color: string; radius: number } {
+    const birdId = this.slingshotController.getBirdId();
+    const birdTag = this.entityManager.getComponent<BirdTag>(birdId, Components.BirdTag);
     const def = birdTag ? BirdDefinitions[birdTag.birdTypeId] : undefined;
-    return { color: def?.color ?? '#d64541', radius: def?.radius ?? 20 };
+
+    const boosted = this.entityManager.getComponent<SpeedBoosted>(birdId, Components.SpeedBoosted);
+    const isGlowing = !!boosted && now - boosted.activatedAtMs < GameConfig.abilities.speedBoost.glowDurationMs;
+
+    return {
+      color: isGlowing ? '#ffffff' : def?.color ?? '#d64541',
+      radius: (def?.radius ?? 20) * (isGlowing ? 1.4 : 1),
+    };
   }
 
   private updateFps(frameTimeMs: number): void {

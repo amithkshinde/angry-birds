@@ -59,4 +59,30 @@ export const GameConfig = {
     hitBurstCount: 8,
     destroyBurstCount: 14,
   },
+  abilities: {
+    split: {
+      /** Angle (radians) each child diverges from the parent's trajectory. */
+      spreadRadians: 0.26,
+      /** How far from the parent, along that angle, a child spawns — avoids instant self-overlap. */
+      spawnOffset: 18,
+    },
+    speedBoost: {
+      /** Speed added on top of current velocity, independent of the bird's mass. */
+      boostSpeedAdd: 24,
+      /** How long the trail flares brighter after boosting. */
+      glowDurationMs: 500,
+    },
+    black: {
+      explosionRadius: 140,
+      /** Damage at the blast center; falls off linearly to 0 at explosionRadius. */
+      maxDamage: 90,
+      /** Knockback impulse at the blast center; falls off the same way. Divided by each body's own mass, so light debris/pigs fly further than heavy blocks. */
+      maxImpulse: 22,
+      /** Below this speed, the bird counts as "resting" for the auto-explode timer. */
+      restSpeedThreshold: 0.6,
+      autoExplodeAfterRestMs: 1200,
+      /** Synthetic impact speed fed to the shared hit-VFX pipeline, scaled by the same distance falloff as damage. */
+      impactSpeedForVfx: 18,
+    },
+  },
 } as const;

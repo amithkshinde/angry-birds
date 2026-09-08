@@ -90,6 +90,25 @@ export class PhysicsWorld {
     return body ? { x: body.velocity.x, y: body.velocity.y } : undefined;
   }
 
+  getMass(entityId: EntityId): number | undefined {
+    return this.entityToBody.get(entityId)?.mass;
+  }
+
+  /**
+   * Instant impulse: adds impulse/mass to the body's *current* velocity
+   * rather than replacing it — momentum-preserving, unlike setVelocity.
+   * Used by abilities (Yellow's speed boost, Black's explosion knockback)
+   * that should add to whatever the body is already doing, not override it.
+   */
+  applyImpulse(entityId: EntityId, impulse: { x: number; y: number }): void {
+    const body = this.entityToBody.get(entityId);
+    if (!body) return;
+    Matter.Body.setVelocity(body, {
+      x: body.velocity.x + impulse.x / body.mass,
+      y: body.velocity.y + impulse.y / body.mass,
+    });
+  }
+
   getEntityForBody(bodyId: number): EntityId | undefined {
     return this.bodyIdToEntity.get(bodyId);
   }

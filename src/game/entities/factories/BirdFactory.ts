@@ -7,6 +7,7 @@ import type { Transform } from '../components/Transform';
 import type { PhysicsBodyRef } from '../components/PhysicsBody';
 import type { RenderShape } from '../components/RenderShape';
 import type { BirdTag } from '../components/BirdTag';
+import type { AbilityState } from '../components/AbilityState';
 import type { EntityId } from '../Entity';
 
 export function createBird(
@@ -25,10 +26,12 @@ export function createBird(
   entityManager.addComponent<RenderShape>(id, Components.RenderShape, {
     shape: 'circle',
     color: def.color,
+    spriteKey: def.spriteKey,
     radius: def.radius,
     zIndex: 10,
   });
   entityManager.addComponent<BirdTag>(id, Components.BirdTag, { birdTypeId: def.id });
+  entityManager.addComponent<AbilityState>(id, Components.AbilityState, { abilityId: def.abilityId, used: false });
 
   return id;
 }

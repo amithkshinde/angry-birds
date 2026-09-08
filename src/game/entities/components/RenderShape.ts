@@ -1,9 +1,11 @@
 export type ShapeKind = 'circle' | 'rectangle';
 
 /**
- * Primitive-shape rendering, standing in for sprites until an atlas system
- * lands. WorldLayer can grow to check for a future RenderSprite component
- * alongside this one without touching this shape.
+ * The flat-color shape doubles as the sprite's fallback: if `spriteKey` is
+ * set, WorldLayer draws that image (once loaded) scaled to fit this
+ * shape's bounding box instead of filling it. Sprites are additive polish
+ * on top of an always-correct primitive, never a hard dependency — a
+ * missing/loading image just means the flat shape keeps showing.
  */
 export interface RenderShape {
   shape: ShapeKind;
@@ -12,4 +14,5 @@ export interface RenderShape {
   radius?: number;
   width?: number;
   height?: number;
+  spriteKey?: string;
 }

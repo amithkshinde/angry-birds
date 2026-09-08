@@ -26,6 +26,7 @@ export function createPig(
   entityManager.addComponent<RenderShape>(id, Components.RenderShape, {
     shape: 'circle',
     color: def.color,
+    spriteKey: def.spriteKey,
     radius: def.radius,
     zIndex: 8,
   });

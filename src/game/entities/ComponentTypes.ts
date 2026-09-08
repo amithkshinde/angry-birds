@@ -12,4 +12,6 @@ export const Components = {
   PigTag: 'pigTag',
   Health: 'health',
   Lifecycle: 'lifecycle',
+  AbilityState: 'abilityState',
+  SpeedBoosted: 'speedBoosted',
 } as const;
