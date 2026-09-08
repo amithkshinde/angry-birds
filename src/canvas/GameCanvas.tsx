@@ -1,17 +1,25 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { GameEngine } from '../game/GameEngine';
+import { getLevelById, getNextLevelId } from '../game/level/LevelRegistry';
+import { SaveManager } from '../game/progress/SaveManager';
+
+interface Props {
+  levelId: string;
+  /** null means "back to level select"; a string means "load this level next". */
+  onFinish: (nextLevelId: string | null) => void;
+}
 
 /**
  * The only file that bridges React and the imperative game engine. Owns
  * canvas sizing (including devicePixelRatio) and the engine's lifecycle —
- * including tearing one down and building a fresh one on Retry, which is
- * also exactly what a level restart is. Win/loss are the two pieces of
- * coarse-grained state React needs from the engine, each delivered via a
- * single low-frequency EventBus subscription rather than per-frame polling.
+ * including tearing one down and building a fresh one, whether that's a
+ * Retry of the same level or a level change (a new `levelId` prop) driven
+ * by the parent. Win/loss are the two pieces of coarse-grained state React
+ * needs from the engine, each delivered via a single low-frequency
+ * EventBus subscription rather than per-frame polling.
  */
-export function GameCanvas() {
+export function GameCanvas({ levelId, onFinish }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const engineRef = useRef<GameEngine | null>(null);
   const cleanupRef = useRef<() => void>(() => {});
   const [levelWon, setLevelWon] = useState(false);
   const [levelLost, setLevelLost] = useState(false);
@@ -21,13 +29,17 @@ export function GameCanvas() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    const level = getLevelById(levelId);
+    if (!level) return;
 
     setLevelWon(false);
     setLevelLost(false);
 
-    const engine = new GameEngine(canvas, canvas.clientWidth, canvas.clientHeight);
-    engineRef.current = engine;
-    const unsubscribeWon = engine.onLevelWon(() => setLevelWon(true));
+    const engine = new GameEngine(canvas, canvas.clientWidth, canvas.clientHeight, level);
+    const unsubscribeWon = engine.onLevelWon(() => {
+      SaveManager.markCompleted(levelId);
+      setLevelWon(true);
+    });
     const unsubscribeLost = engine.onLevelLost(() => setLevelLost(true));
 
     const resize = () => {
@@ -49,19 +61,20 @@ export function GameCanvas() {
       unsubscribeWon();
       unsubscribeLost();
       engine.dispose();
-      engineRef.current = null;
     };
   };
 
   useEffect(() => {
     startEngine();
     return () => cleanupRef.current();
-  }, []);
+  }, [levelId]);
 
   const handleRetry = () => {
     cleanupRef.current();
     startEngine();
   };
+
+  const nextLevelId = getNextLevelId(levelId);
 
   return (
     <div style={containerStyle}>
@@ -73,9 +86,19 @@ export function GameCanvas() {
         <div style={overlayStyle}>
           <div style={panelStyle}>
             <div>Level Complete!</div>
-            <button style={buttonStyle} onClick={handleRetry}>
-              Play Again
-            </button>
+            <div style={buttonRowStyle}>
+              <button style={buttonStyle} onClick={handleRetry}>
+                Retry
+              </button>
+              {nextLevelId && (
+                <button style={buttonStyle} onClick={() => onFinish(nextLevelId)}>
+                  Next Level
+                </button>
+              )}
+              <button style={secondaryButtonStyle} onClick={() => onFinish(null)}>
+                Level Select
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -83,9 +106,14 @@ export function GameCanvas() {
         <div style={overlayStyle}>
           <div style={panelStyle}>
             <div>Out of Birds!</div>
-            <button style={buttonStyle} onClick={handleRetry}>
-              Retry
-            </button>
+            <div style={buttonRowStyle}>
+              <button style={buttonStyle} onClick={handleRetry}>
+                Retry
+              </button>
+              <button style={secondaryButtonStyle} onClick={() => onFinish(null)}>
+                Level Select
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -123,14 +151,24 @@ const panelStyle: CSSProperties = {
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
 };
 
+const buttonRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 12,
+};
+
 const buttonStyle: CSSProperties = {
-  padding: '10px 24px',
+  padding: '10px 20px',
   borderRadius: 8,
   border: 'none',
   background: '#e74c3c',
   color: '#fff',
   fontFamily: 'system-ui, sans-serif',
-  fontSize: 16,
+  fontSize: 15,
   fontWeight: 600,
   cursor: 'pointer',
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  background: '#7f8c8d',
 };

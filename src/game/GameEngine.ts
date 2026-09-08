@@ -6,16 +6,14 @@ import { Renderer } from './render/Renderer';
 import { GameConfig } from './config/GameConfig';
 import { MaterialDefinitions } from './config/MaterialDefinitions';
 import { BirdDefinitions } from './config/BirdDefinitions';
-import { PigDefinitions } from './config/PigDefinitions';
-import { createGround } from './entities/factories/GroundFactory';
-import { createBlock } from './entities/factories/BlockFactory';
 import { createBird } from './entities/factories/BirdFactory';
-import { createPig } from './entities/factories/PigFactory';
 import { spawnDebris } from './entities/factories/DebrisFactory';
 import { InputController } from './input/InputController';
 import { SlingshotController } from './input/SlingshotController';
 import { WinLossEvaluator } from './level/WinLossEvaluator';
 import { BirdQueue } from './level/BirdQueue';
+import { buildLevel } from './level/LevelBuilder';
+import type { LevelDefinition } from './level/LevelSchema';
 import { EventBus } from './EventBus';
 import type { GameEvents } from './GameEvents';
 import { Components } from './entities/ComponentTypes';
@@ -23,15 +21,6 @@ import type { MaterialTag } from './entities/components/MaterialTag';
 import type { Lifecycle } from './entities/components/Lifecycle';
 import type { EntityId } from './entities/Entity';
 import type { Point } from './math/Point';
-
-interface SceneSetup {
-  birdId: EntityId;
-  anchor: Point;
-  groundTopY: number;
-  pigCount: number;
-  /** Bird type ids still to come after the one already loaded. */
-  remainingBirdTypeIds: string[];
-}
 
 /**
  * Owns the fixed-timestep accumulator loop: steps Matter.js at a constant
@@ -67,12 +56,12 @@ export class GameEngine {
   private fpsFrameCount = 0;
   private fpsAccumMs = 0;
 
-  constructor(canvas: HTMLCanvasElement, width: number, height: number) {
+  constructor(canvas: HTMLCanvasElement, width: number, height: number, level: LevelDefinition) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas context unavailable');
 
     this.renderer = new Renderer(ctx, this.entityManager, width, height);
-    const scene = this.setupScene(width, height);
+    const scene = buildLevel(this.entityManager, this.physicsWorld, level, width, height);
     this.anchor = scene.anchor;
     this.birdQueue = new BirdQueue(scene.remainingBirdTypeIds);
 
@@ -99,64 +88,6 @@ export class GameEngine {
       this.gameOver = true;
     });
     this.wireInput();
-  }
-
-  /** Milestone 4 scene: ground, one block of each material, a pig perched on wood, and a slingshot holding one bird. */
-  private setupScene(width: number, height: number): SceneSetup {
-    const groundHeight = 80;
-    const groundTopY = height - groundHeight;
-
-    createGround(
-      this.entityManager,
-      this.physicsWorld,
-      MaterialDefinitions.ground,
-      width / 2,
-      groundTopY + groundHeight / 2,
-      Math.max(width * 2, 2000),
-      groundHeight,
-    );
-
-    const blockWidth = 60;
-    const blockHeight = 60;
-    const blockX = width * 0.6;
-    const blockY = groundTopY - blockHeight / 2;
-
-    createBlock(this.entityManager, this.physicsWorld, MaterialDefinitions.wood, blockX, blockY, blockWidth, blockHeight);
-    createBlock(
-      this.entityManager,
-      this.physicsWorld,
-      MaterialDefinitions.ice,
-      blockX - 110,
-      blockY,
-      blockWidth,
-      blockHeight,
-    );
-    createBlock(
-      this.entityManager,
-      this.physicsWorld,
-      MaterialDefinitions.stone,
-      blockX + 110,
-      blockY,
-      blockWidth,
-      blockHeight,
-    );
-
-    const pigDef = PigDefinitions.small;
-    const pigX = blockX;
-    const pigY = blockY - blockHeight / 2 - pigDef.radius;
-    createPig(this.entityManager, this.physicsWorld, pigDef, pigX, pigY);
-
-    const anchor: Point = {
-      x: width * GameConfig.slingshot.anchorXRatio,
-      y: groundTopY - GameConfig.slingshot.anchorYOffsetFromGround,
-    };
-    const [firstBirdType, ...remainingBirdTypeIds] = GameConfig.birds.queue;
-    const birdId = createBird(this.entityManager, this.physicsWorld, BirdDefinitions[firstBirdType], anchor.x, anchor.y);
-    // Held in the pouch: static until launched, so gravity and collisions
-    // don't touch it while the player is aiming.
-    this.physicsWorld.setStatic(birdId, true);
-
-    return { birdId, anchor, groundTopY, pigCount: 1, remainingBirdTypeIds };
   }
 
   private wireInput(): void {

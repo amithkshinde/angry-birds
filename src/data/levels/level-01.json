@@ -1,0 +1,11 @@
+{
+  "id": "level-01",
+  "name": "First Strike",
+  "birds": ["red", "red"],
+  "blocks": [
+    { "material": "wood", "xRatio": 0.6, "yFromGround": 30, "width": 60, "height": 60 }
+  ],
+  "pigs": [
+    { "xRatio": 0.6, "yFromGround": 80 }
+  ]
+}

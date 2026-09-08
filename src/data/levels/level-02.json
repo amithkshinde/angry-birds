@@ -1,0 +1,12 @@
+{
+  "id": "level-02",
+  "name": "Icy Foothold",
+  "birds": ["red", "red", "red"],
+  "blocks": [
+    { "material": "ice", "xRatio": 0.5, "yFromGround": 30, "width": 60, "height": 60 },
+    { "material": "stone", "xRatio": 0.65, "yFromGround": 30, "width": 60, "height": 60 }
+  ],
+  "pigs": [
+    { "xRatio": 0.5, "yFromGround": 80 }
+  ]
+}
