@@ -45,17 +45,29 @@ export class InputController {
   }
 
   /**
-   * offsetX/offsetY (not clientX/Y minus getBoundingClientRect) — the
-   * browser computes these via real hit-testing against the target's own
-   * box, so they stay correct even when the canvas or an ancestor has a
-   * CSS transform applied (e.g. the landscape-lock rotation on mobile).
-   * A plain clientX - rect.left breaks under rotation: the bounding rect
-   * is axis-aligned in screen space, but the element's local axes aren't,
-   * so the subtraction silently maps to the wrong point — which reads
-   * exactly like "drag release launches in the wrong direction".
+   * clientX/clientY + getBoundingClientRect, not offsetX/offsetY.
+   * offsetX/offsetY looked like the right tool (the browser computes them
+   * via hit-testing, so they should already account for any CSS
+   * transform) but touch-derived PointerEvents' offsetX/offsetY are
+   * unreliable on real mobile Safari, especially once setPointerCapture
+   * is in play — it can report stale or zeroed values on pointerup,
+   * which reads as "drag release does nothing" (the computed pull
+   * distance comes out near zero, so SlingshotController treats it as a
+   * cancelled shot). clientX/clientY and getBoundingClientRect() are both
+   * universally reliable, so instead we do the rotation math ourselves,
+   * matching the exact transform applied in index.css: under the
+   * landscape lock, the canvas's screen-space rect has width/height
+   * swapped relative to its own local (pre-rotation) box, so local X
+   * comes from distance-from-the-top and local Y from distance-from-the-
+   * right, rather than the usual left/top.
    */
   private toLocalPoint(event: PointerEvent): Point {
-    return { x: event.offsetX, y: event.offsetY };
+    const rect = this.canvas.getBoundingClientRect();
+    const isLandscapeLocked = window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
+    if (isLandscapeLocked) {
+      return { x: event.clientY - rect.top, y: rect.right - event.clientX };
+    }
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
   private handlePointerDown = (event: PointerEvent): void => {
